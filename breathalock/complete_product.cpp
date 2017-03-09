@@ -49,7 +49,7 @@ void setup(void)
       Serial.println("Initialised Bluefruit LE module...");
    }
    
-   ble.end(); // Why is this here?
+   ble.end(); // Why is this here? <--- look into if I can delete this.
    finger.begin(57600);
    
    if (finger.verifyPassword()) {

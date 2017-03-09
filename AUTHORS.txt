@@ -1,0 +1,20 @@
+breathalock authors & contributors
+
+Core Developers:
+	Charles Taylor (astro-charles)
+
+Electrical Engineers:
+	Nam Ngo
+	Nick Fraser
+    
+Web Developers:
+	Charles Taylor
+	
+3D Case Design:
+    	Nick Fraser
+
+Android App:
+	Charles Taylor
+
+Mentor:
+	Lei Wei

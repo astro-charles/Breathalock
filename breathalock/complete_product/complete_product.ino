@@ -5,8 +5,7 @@
 #include "Adafruit_BluefruitLE_SPI.h"
 #include "Adafruit_BluefruitLE_UART.h"
 
-#include "BreathalockConfig.h"
-
+#include "BreathalockConfig.hpp"
 #include <Adafruit_Fingerprint.h>
 
 SoftwareSerial bluefruitSS = SoftwareSerial(BLUEFRUIT_SWUART_TXD_PIN, BLUEFRUIT_SWUART_RXD_PIN);
@@ -17,8 +16,12 @@ Adafruit_BluefruitLE_UART ble(bluefruitSS, BLUEFRUIT_UART_MODE_PIN,
 
 SoftwareSerial mySerial(FINGER_SOFTWARE_SERIAL_TX, FINGER_SOFTWARE_SERIAL_RX);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+
 boolean fingerprint_unlocked = false;
-//boolean bleEnabled = false;
+boolean first_time_reading = true;
+float baseline_alcohol_val = 0;
+
 // A small helper
 void error(const __FlashStringHelper*err) {
   Serial.println(err);
@@ -37,27 +40,21 @@ void setup(void)
    Serial.begin(9600);
    delay(500);
    pinMode(GATE_POWER_PIN, OUTPUT);
-   pinMode(MOSTFET_GAS_HEATER, OUTPUT);
-   pinMode(MOSFET_FINGERPRINT,OUTPUT);
    pinMode(RED_RGB_PIN_STATUS, OUTPUT);
    pinMode(BLUE_RGB_PIN_STATUS, OUTPUT);
    pinMode(GREEN_RGB_PIN_STATUS, OUTPUT);
-   digitalWrite(MOSFET_FINGERPRINT,HIGH); //This is for unlocking the MOS
+   pinMode(STATUS_LIGHT_YELLOW, OUTPUT);
    
-   digitalWrite(MOSTFET_GAS_HEATER,LOW); //This is for unlocking the MOS
    if(!initBLEDevice()) {
       Serial.println("Initialised Bluefruit LE module...");
    }
-   
-   ble.end(); // Why is this here? <--- look into if I can delete this.
+  
    finger.begin(57600);
    
-   if (finger.verifyPassword()) {
-    Serial.println("Found fingerprint sensor!");
-   } else {
+   if (!finger.verifyPassword()) {
     Serial.println("Did not find fingerprint sensor");
     fingerprint_unlocked = true;
-  } 
+   }
 }
 
 /**************************************************************************/
@@ -67,33 +64,52 @@ void setup(void)
 /**************************************************************************/
 void loop(void)
 {
-  char commandToSend[25];
-  String command= "AT+BLEUARTTX= ";
-  int alcoholRead = readAlcoholLevel();
-
-  String readToStr = String(alcoholRead);
-
-  readToStr.concat("\n");
-  command.concat(readToStr);
-  command.toCharArray(commandToSend,25);
+  char commandToSend[24];
+  String ATICommand= "AT+BLEUARTTX= ";
+  float alcoholRead = 0;
+  String alcReadToStr;
+  unsigned long currentMillis = millis();
   
+  if(first_time_reading && currentMillis >= WARMUP_TIME_MS) {
+    first_time_reading = false;
+    baseline_alcohol_val = readAlcoholLevel(100);
+    Serial.println("first read complete value is: ");
+    Serial.println(baseline_alcohol_val);
+  }
   
-  if(fingerprint_unlocked){
-    //if(ble.isConnected()) {
-      Serial.println(commandToSend);
-      ble.sendCommandCheckOK(commandToSend);
-      //delay(500);
-    //}
+  if(fingerprint_unlocked && !first_time_reading){
+    colorChange(0,255,0); // green
+    /* stringify our float value then concat it with our bluetooth ATI command  */
+    alcoholRead = readAlcoholLevel(100);
+    alcReadToStr = String(alcoholRead);
+    alcReadToStr.concat(" ");
+    ATICommand.concat(alcReadToStr);
+    ATICommand.toCharArray(commandToSend,45);
+    /* end block stringification */ 
+    
+    //DEBUG
+    Serial.print("alcholValue = "); Serial.println(alcReadToStr);
+    
+    /* send stringified command (XXX is gas value): AT+BLEUARTTX= XXX */
+    ble.sendCommandCheckOK(commandToSend);
+    
+//    if(alcoholRead >= 4.00) {
+//      digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
+//      digitalWrite(GATE_POWER_PIN,LOW);
+//    }else {
+//      digitalWrite(STATUS_LIGHT_YELLOW,LOW);
+//      digitalWrite(GATE_POWER_PIN,HIGH);
+//    }
   }else {
-    colorChange(255,0,0);
+    /* notify the users without smart phones that the device is locked */
+    colorChange(255,0,0); // red
     if(getFingerprintStatus() != -1) {
-      colorChange(0,255,0);
-      Serial.println("fingerprint found");
+      /* finger print was found unlock the rest of the devices functionality */
       fingerprint_unlocked = true;
-      finger.end();
-      digitalWrite(MOSFET_FINGERPRINT,LOW); //This is for unlocking the MOS
-      delay(500);
-      digitalWrite(MOSTFET_GAS_HEATER,HIGH); //This is for unlocking the MOS
+      finger.end(); // end all fingerprint activity until reset (physical shutoff or push button reset
+      
+      //TODO: evaluate if delay is needed
+      delay(500); 
     } 
   }
 }
@@ -127,6 +143,30 @@ bool initBLEDevice() {
   
   return true;
 }
+
+/**************************************************************************/
+/*!
+    @brief     this is how we will check the users limit against our delta defined in our header file.
+    @return    return true if user is over limit
+*/
+/**************************************************************************/
+boolean isOverLimit(float value) {
+
+  return false;
+}
+
+
+/**************************************************************************/
+/*!
+    @brief     this is how we check if the user has blown into the device if not remain car locked
+    @return    return true if user has blown
+*/
+/**************************************************************************/
+boolean isUserBlowing(float value) {
+  
+  return false;
+}
+
 /**************************************************************************/
 /*!
     @brief     change status light led to corresponding color
@@ -149,37 +189,27 @@ boolean colorChange(int red, int blue, int green) {
 */
 /**************************************************************************/
 
-int readAlcoholLevel() {
-  int mq3Average          = 0;
-//  int mq3value_readBase   = 0;
-  int mq3value_readOne    = 0;
-  int mq3value_readTwo    = 0;
-  int mq3value_readThree  = 0;
-  int mq3value_readFour   = 0;
+float readAlcoholLevel(int reads) {
+  float mq3Sum=0;
+  float mq3RealValue = 0;
+  float mq3Average = 0;
   
-    
-  mq3value_readOne   = analogRead(GAS_SENSOR_PIN);
-  delay(50);
-  mq3value_readTwo   = analogRead(GAS_SENSOR_PIN);
-  delay(50);
-  mq3value_readThree = analogRead(GAS_SENSOR_PIN);
-  delay(50);
-  mq3value_readFour  = analogRead(GAS_SENSOR_PIN);
+  //sum together READs number of analogReads for the gas sensor to collect an avg
+  for(int i=0;i<reads;i++) {
+    mq3Sum = mq3Sum + analogRead(GAS_SENSOR_PIN);
+  }
   
-  mq3Average = (mq3value_readOne +
-                mq3value_readTwo +
-                mq3value_readThree +
-                mq3value_readFour);
-  mq3Average /= 4;
-  return (int) mq3Average;
- 
+  mq3Average = mq3Sum/reads;
+  mq3RealValue = (mq3Average/1024)*5.0;
+  
+  return mq3RealValue;
 } 
 
 /**************************************************************************/
 /*!
-    @brief     read the gas sensor value
-    @return    return the average value take from the gas sensor
-    @see       https://cdn.sparkfun.com/datasheets/Sensors/Biometric/MQ-3%20ver1.3%20-%20Manual.pdf
+    @brief     get the fingerprint statu
+    @return    return the the id found that matches the fingerprint stored on the sensor itself
+    @see       https://www.adafruit.com/product/751
 */
 /**************************************************************************/
 int getFingerprintStatus() {
@@ -194,6 +224,6 @@ int getFingerprintStatus() {
   
   // found a match!
   Serial.print("Found ID #"); Serial.print(finger.fingerID); 
-//  Serial.print(" with confidence of "); Serial.println(finger.confidence);
+  //To identify confidence use finger.confidence;however, practically useless.
   return finger.fingerID; 
 }

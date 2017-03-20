@@ -1,9 +1,9 @@
 // COMMON SETTINGS
 
 //GAS SENSOR SETTINGS
-#define DELTA_TOLERANCE				   		   30
-#define V_LOAD_RESISTOR 					   10
-#define WARMUP_TIME_MS						   5000									
+#define DELTA_TOLERANCE                 30
+#define V_LOAD_RESISTOR                 10
+#define WARMUP_TIME_MS                  15000                 
 
 // NAME HERE SETTINGS
 // ----------------------------------------------------------------------------------------------
@@ -16,13 +16,13 @@
 #define BLUE_RGB_PIN_STATUS                  6
 #define GREEN_RGB_PIN_STATUS                 5
 //FINGERPRINT
-#define FINGER_SOFTWARE_SERIAL_TX            2  //White
+#define FINGER_SOFTWARE_SERIAL_TX            2 //White
 #define FINGER_SOFTWARE_SERIAL_RX            7 //Green
 //Status Light
-#define STATUS_LIGHT_YELLOW					 13
+#define STATUS_LIGHT_YELLOW                  13
 
-#define MOSFET_GAS_HEATER                   A2 // tx
-#define MOSFET_FINGERPRINT                   A1 // rx
+#define MOSFET_GAS_HEATER                    A2 
+#define MOSFET_FINGERPRINT                   A1 
        
 
 // SOFTWARE UART SETTINGS
@@ -57,6 +57,7 @@
 // The following sets the optional Mode pin, its recommended but not required
 // ----------------------------------------------------------------------------------------------
 #define BLUEFRUIT_UART_MODE_PIN        -1    // Set to -1 if unused
+
 
 
 

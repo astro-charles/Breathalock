@@ -17,10 +17,16 @@ Adafruit_BluefruitLE_UART ble(bluefruitSS, BLUEFRUIT_UART_MODE_PIN,
 SoftwareSerial mySerial(FINGER_SOFTWARE_SERIAL_TX, FINGER_SOFTWARE_SERIAL_RX);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
+// The device has been unlocked via the fingerprint sensor this needs 
+// be global so that the device can remember the device has been unlocked 
+boolean bUnlockedDeviceFingerprint = false;
 
-boolean fingerprint_unlocked = false;
-boolean first_time_reading = true;
-float baseline_alcohol_val = 0;
+// This value is used for determining if the MQ3 has been intilized yet
+boolean bMQ3Initialized = false;
+
+// The device uses this value to determine if the countdown timer needs to be activated again
+// this is only used once through the entirity of the programs life.
+float fBaselineAlcoholValue = 0.00;
 
 // A small helper
 void error(const __FlashStringHelper*err) {
@@ -39,21 +45,24 @@ void setup(void)
 {
    Serial.begin(9600);
    delay(500);
-   pinMode(GATE_POWER_PIN, OUTPUT);
+   pinMode(GATE_POWER_PIN, OUTPUT); // for the unlock button
+   pinMode(STATUS_LIGHT_YELLOW, OUTPUT); // if drunk this comes on
    pinMode(RED_RGB_PIN_STATUS, OUTPUT);
    pinMode(BLUE_RGB_PIN_STATUS, OUTPUT);
    pinMode(GREEN_RGB_PIN_STATUS, OUTPUT);
-   pinMode(STATUS_LIGHT_YELLOW, OUTPUT);
+   
    
    if(!initBLEDevice()) {
-      Serial.println("Initialised Bluefruit LE module...");
+      Serial.println("Initialised Bluetooth LE module...");
    }
   
    finger.begin(57600);
-   
+   Serial.print("Initialising Fingerprint module: ");
    if (!finger.verifyPassword()) {
     Serial.println("Did not find fingerprint sensor");
-    fingerprint_unlocked = true;
+    bUnlockedDeviceFingerprint = true;
+   }else {
+    Serial.println("OK!");
    }
 }
 
@@ -65,47 +74,29 @@ void setup(void)
 void loop(void)
 {
   char commandToSend[24];
-  String ATICommand= "AT+BLEUARTTX= ";
   float alcoholRead = 0;
-  String alcReadToStr;
-  unsigned long currentMillis = millis();
   
-  if(first_time_reading && currentMillis >= WARMUP_TIME_MS) {
-    first_time_reading = false;
-    baseline_alcohol_val = readAlcoholLevel(100);
-    Serial.println("first read complete value is: ");
-    Serial.println(baseline_alcohol_val);
+  if(!bMQ3Initialized) { // Check if MQ3 has been initialized yet
+    fBaselineAlcoholValue = recordBaseline();
   }
   
-  if(fingerprint_unlocked && !first_time_reading){
+  if(bUnlockedDeviceFingerprint && bMQ3Initialized){
     colorChange(0,255,0); // green
+     
     /* stringify our float value then concat it with our bluetooth ATI command  */
     alcoholRead = readAlcoholLevel(100);
-    alcReadToStr = String(alcoholRead);
-    alcReadToStr.concat(" ");
-    ATICommand.concat(alcReadToStr);
-    ATICommand.toCharArray(commandToSend,45);
-    /* end block stringification */ 
-    
+    stringifyAlcohol(alcoholRead).toCharArray(commandToSend,24);
     //DEBUG
-    Serial.print("alcholValue = "); Serial.println(alcReadToStr);
-    
+    Serial.print("alcoholValue = "); Serial.println(commandToSend);
+    isOverLimit(alcoholRead,fBaselineAlcoholValue);
     /* send stringified command (XXX is gas value): AT+BLEUARTTX= XXX */
     ble.sendCommandCheckOK(commandToSend);
-    
-//    if(alcoholRead >= 4.00) {
-//      digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
-//      digitalWrite(GATE_POWER_PIN,LOW);
-//    }else {
-//      digitalWrite(STATUS_LIGHT_YELLOW,LOW);
-//      digitalWrite(GATE_POWER_PIN,HIGH);
-//    }
   }else {
     /* notify the users without smart phones that the device is locked */
     colorChange(255,0,0); // red
     if(getFingerprintStatus() != -1) {
       /* finger print was found unlock the rest of the devices functionality */
-      fingerprint_unlocked = true;
+      bUnlockedDeviceFingerprint = true;
       finger.end(); // end all fingerprint activity until reset (physical shutoff or push button reset
       
       //TODO: evaluate if delay is needed
@@ -122,7 +113,7 @@ void loop(void)
 /**************************************************************************/
 bool initBLEDevice() {
   /* Initialise the module */
-  Serial.print(F("Initialising the Bluefruit LE module: "));
+  Serial.print(F("Initialising Bluetooth LE module:: "));
 
   if ( !ble.begin(VERBOSE_MODE) )
   {
@@ -133,25 +124,66 @@ bool initBLEDevice() {
 
   /* Disable command echo from Bluefruit */
   ble.echo(false);
-
-  Serial.println("Requesting Bluefruit info:");
-  
-  ble.info();
-
   ble.verbose(VERBOSE_MODE); 
   ble.sendCommandCheckOK("AT+GAPDEVNAME=" DEVICE_NAME);
   
   return true;
 }
+/**************************************************************************/
+/*!
+    @brief     convert alcohol Value to string
+    @return    return false after 15secs
+*/
+/**************************************************************************/
+String stringifyAlcohol(float alcohol_val) {
+  String ATICommand= "AT+BLEUARTTX= ";
+  String alcReadToStr;
+  
+  alcReadToStr = String(alcohol_val);
+  alcReadToStr.concat(" ");
+  ATICommand.concat(alcReadToStr);
 
+  return ATICommand;
+}
+
+/**************************************************************************/
+/*!
+    @brief     This gives us our inital warmed up value that we utilize in comparisons later
+    @return    return false after 15secs
+*/
+/**************************************************************************/
+float recordBaseline() {
+  if(millis() >= WARMUP_TIME_MS && !bMQ3Initialized) {
+    float bl_alcohol_val = readAlcoholLevel(1000);
+    /* BEGIN DEBUG */ 
+    Serial.println("Initialised MQ3 module...");
+    Serial.print("Baseline Alcohol Recorded at : "); Serial.println(bl_alcohol_val);
+    /* END DEBUG */ 
+    bMQ3Initialized = true;
+    return bl_alcohol_val;
+  } 
+  return 0.00;
+}
 /**************************************************************************/
 /*!
     @brief     this is how we will check the users limit against our delta defined in our header file.
     @return    return true if user is over limit
 */
 /**************************************************************************/
-boolean isOverLimit(float value) {
-
+boolean isOverLimit(float alcValue, float baseline_alcValue) {
+  /* BEGIN DEBUG */
+  Serial.print("baseline "); Serial.println(baseline_alcValue);
+  Serial.print("baseline*multiplier: "); Serial.println(baseline_alcValue*(PERCENTAGE_TOLERANCE/100));
+  /* END DEBUG */
+  
+  if (alcValue >= baseline_alcValue*(PERCENTAGE_TOLERANCE/100)) {
+    digitalWrite(GATE_POWER_PIN,LOW);
+    digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
+    return true;
+  }
+  //TODO: Identify how to tell if the user even blew at all.
+  digitalWrite(GATE_POWER_PIN,HIGH);
+  digitalWrite(STATUS_LIGHT_YELLOW,LOW);
   return false;
 }
 
@@ -162,6 +194,8 @@ boolean isOverLimit(float value) {
     @return    return true if user has blown
 */
 /**************************************************************************/
+//TODO: most important otherwise users bypass alchol sensor everytime by not blowing
+// @assign nick and nam help!
 boolean isUserBlowing(float value) {
   
   return false;

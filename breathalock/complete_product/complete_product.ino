@@ -23,7 +23,8 @@ boolean bUnlockedDeviceFingerprint = false;
 
 // This value is used for determining if the MQ3 has been intilized yet
 boolean bMQ3Initialized = false;
-
+//This boolean value is for determining if the user has blown or not.
+boolean bUserHasBlown = false;
 // The device uses this value to determine if the countdown timer needs to be activated again
 // this is only used once through the entirity of the programs life.
 float fBaselineAlcoholValue = 0.00;
@@ -82,12 +83,13 @@ void loop(void)
   
   if(bUnlockedDeviceFingerprint && bMQ3Initialized){
     colorChange(0,255,0); // green
-     
+   
     /* stringify our float value then concat it with our bluetooth ATI command  */
     alcoholRead = readAlcoholLevel(100);
+    bUserHasBlown = isUserBlowing();
     stringifyAlcohol(alcoholRead).toCharArray(commandToSend,24);
     //DEBUG
-    Serial.print("alcoholValue = "); Serial.println(commandToSend);
+//    Serial.print("alcoholValue = "); Serial.println(commandToSend);
     isOverLimit(alcoholRead,fBaselineAlcoholValue);
     /* send stringified command (XXX is gas value): AT+BLEUARTTX= XXX */
     ble.sendCommandCheckOK(commandToSend);
@@ -172,11 +174,11 @@ float recordBaseline() {
 /**************************************************************************/
 boolean isOverLimit(float alcValue, float baseline_alcValue) {
   /* BEGIN DEBUG */
-  Serial.print("baseline "); Serial.println(baseline_alcValue);
-  Serial.print("baseline*multiplier: "); Serial.println(baseline_alcValue*(PERCENTAGE_TOLERANCE/100));
+//  Serial.print("baseline "); Serial.println(baseline_alcValue);
+//  Serial.print("baseline*multiplier: "); Serial.println(baseline_alcValue*(PERCENTAGE_TOLERANCE/100));
   /* END DEBUG */
   
-  if (alcValue >= baseline_alcValue*(PERCENTAGE_TOLERANCE/100)) {
+  if (alcValue >= (baseline_alcValue*(PERCENTAGE_TOLERANCE/100)) + baseline_alcValue) {
     digitalWrite(GATE_POWER_PIN,LOW);
     digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
     return true;
@@ -196,8 +198,22 @@ boolean isOverLimit(float alcValue, float baseline_alcValue) {
 /**************************************************************************/
 //TODO: most important otherwise users bypass alchol sensor everytime by not blowing
 // @assign nick and nam help!
-boolean isUserBlowing(float value) {
+boolean isUserBlowing() {
+  float mq3Value1 = 0;
+  float mq3Value2 = 0;
+  float actualDelta = 0;
   
+  mq3Value1 = mq3Value2 = readAlcoholLevel(100);
+  delay(500);
+  mq3Value2 = readAlcoholLevel(100);
+ 
+  actualDelta =  abs(mq3Value2 - mq3Value1);
+  //BEGIN DEBUG
+  Serial.println(actualDelta);
+  //END DEBUG
+  if (actualDelta > TOLERANCE_DELTA) {
+    return true;
+  }
   return false;
 }
 

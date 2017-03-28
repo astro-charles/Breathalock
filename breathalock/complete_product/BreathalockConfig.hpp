@@ -1,9 +1,10 @@
 // COMMON SETTINGS
 
 //GAS SENSOR SETTINGS
-#define PERCENTAGE_TOLERANCE            250 //
+#define PERCENTAGE_TOLERANCE            30 //
 #define V_LOAD_RESISTOR                 10 // kOhms
-#define WARMUP_TIME_MS                  15000  // milliseconds               
+#define WARMUP_TIME_MS                  15000  // milliseconds    
+#define TOLERANCE_DELTA                 0.05           
 
 // NAME HERE SETTINGS
 // ----------------------------------------------------------------------------------------------

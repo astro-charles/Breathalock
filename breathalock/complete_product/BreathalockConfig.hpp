@@ -4,7 +4,8 @@
 #define PERCENTAGE_TOLERANCE            30 //
 #define V_LOAD_RESISTOR                 10 // kOhms
 #define WARMUP_TIME_MS                  15000  // milliseconds    
-#define TOLERANCE_DELTA                 0.05           
+#define BREATH_DELTA                    0.05    
+#define ALCOHOL_TOLERANCE_DELTA         0.50         
 
 // NAME HERE SETTINGS
 // ----------------------------------------------------------------------------------------------
@@ -17,8 +18,11 @@
 #define BLUE_RGB_PIN_STATUS                  6
 #define GREEN_RGB_PIN_STATUS                 5
 //FINGERPRINT
-#define FINGER_SOFTWARE_SERIAL_TX            2 //White
-#define FINGER_SOFTWARE_SERIAL_RX            7 //Green
+// pin #7 is IN from sensor (GREEN wire) 
+// pin #2 is OUT from arduino  (WHITE wire)
+#define FINGER_SOFTWARE_SERIAL_TX            7 
+#define FINGER_SOFTWARE_SERIAL_RX            2 
+#define NUMBER_OF_FAILED_ATTEMPTS            3
 //Status Light
 #define STATUS_LIGHT_YELLOW                  13
 

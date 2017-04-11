@@ -13,21 +13,26 @@ SoftwareSerial bluefruitSS = SoftwareSerial(BLUEFRUIT_SWUART_TXD_PIN, BLUEFRUIT_
 Adafruit_BluefruitLE_UART ble(bluefruitSS, BLUEFRUIT_UART_MODE_PIN,
                       BLUEFRUIT_UART_CTS_PIN, BLUEFRUIT_UART_RTS_PIN);
 
-
 SoftwareSerial mySerial(FINGER_SOFTWARE_SERIAL_TX, FINGER_SOFTWARE_SERIAL_RX);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
 // The device has been unlocked via the fingerprint sensor this needs 
 // be global so that the device can remember the device has been unlocked 
 boolean bUnlockedDeviceFingerprint = false;
-
+boolean bFingerprintFailed = false;
 // This value is used for determining if the MQ3 has been intilized yet
 boolean bMQ3Initialized = false;
 //This boolean value is for determining if the user has blown or not.
 boolean bUserHasBlown = false;
+//
+boolean bUserFailedToAuth = false;
 // The device uses this value to determine if the countdown timer needs to be activated again
 // this is only used once through the entirity of the programs life.
 float fBaselineAlcoholValue = 0.00;
+int failed_attempts=0;
+
+boolean bIsUserOverTheLimit = false;
+
 
 // A small helper
 void error(const __FlashStringHelper*err) {
@@ -51,7 +56,7 @@ void setup(void)
    pinMode(RED_RGB_PIN_STATUS, OUTPUT);
    pinMode(BLUE_RGB_PIN_STATUS, OUTPUT);
    pinMode(GREEN_RGB_PIN_STATUS, OUTPUT);
-   
+   digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
    
    if(!initBLEDevice()) {
       Serial.println("Initialised Bluetooth LE module...");
@@ -61,7 +66,10 @@ void setup(void)
    Serial.print("Initialising Fingerprint module: ");
    if (!finger.verifyPassword()) {
     Serial.println("Did not find fingerprint sensor");
+    //Fingerprint not found allow the user to proceed with full functionality see comment below
     bUnlockedDeviceFingerprint = true;
+    //The fingerprint device is not found disable unlocking ability
+    bFingerprintFailed=true;
    }else {
     Serial.println("OK!");
    }
@@ -80,30 +88,41 @@ void loop(void)
   if(!bMQ3Initialized) { // Check if MQ3 has been initialized yet
     fBaselineAlcoholValue = recordBaseline();
   }
-  
   if(bUnlockedDeviceFingerprint && bMQ3Initialized){
-    colorChange(0,255,0); // green
-   
+//    if(bFingerprintFailed) {
+//      colorChange(0,0,255); // blue
+//    }else {
+//      colorChange(0,255,0); // green
+//    }
+    if(bUserHasBlown) {
     /* stringify our float value then concat it with our bluetooth ATI command  */
-    alcoholRead = readAlcoholLevel(100);
-    bUserHasBlown = isUserBlowing();
-    stringifyAlcohol(alcoholRead).toCharArray(commandToSend,24);
-    //DEBUG
-//    Serial.print("alcoholValue = "); Serial.println(commandToSend);
-    isOverLimit(alcoholRead,fBaselineAlcoholValue);
-    /* send stringified command (XXX is gas value): AT+BLEUARTTX= XXX */
-    ble.sendCommandCheckOK(commandToSend);
+      alcoholRead = readAlcoholLevel(100);
+      stringifyAlcohol(alcoholRead).toCharArray(commandToSend,24);
+      //BEGIN DEBUG
+      Serial.print("alcoholValue = "); Serial.println(commandToSend);
+      //END DEBUG
+      if(!bIsUserOverTheLimit) {
+        bIsUserOverTheLimit = isOverLimit(alcoholRead,fBaselineAlcoholValue);
+      }
+      
+      /* send stringified command (XXX is gas value): AT+BLEUARTTX= XXX */
+      ble.sendCommandCheckOK(commandToSend);
+    }else {
+      bUserHasBlown = isUserBlowing();
+      Serial.println("testing blown");
+    }
   }else {
     /* notify the users without smart phones that the device is locked */
-    colorChange(255,0,0); // red
-    if(getFingerprintStatus() != -1) {
-      /* finger print was found unlock the rest of the devices functionality */
-      bUnlockedDeviceFingerprint = true;
-      finger.end(); // end all fingerprint activity until reset (physical shutoff or push button reset
-      
-      //TODO: evaluate if delay is needed
-      delay(500); 
-    } 
+    if(!bUserFailedToAuth) {
+      if(getFingerprintStatus() != -1) {
+        /* finger print was found unlock the rest of the devices functionality */
+        bUnlockedDeviceFingerprint = true;
+        finger.end(); // end all fingerprint activity until reset (physical shutoff or push button reset
+        
+        //TODO: evaluate if delay is needed
+        delay(250); 
+      } 
+    }
   }
 }
 
@@ -162,6 +181,7 @@ float recordBaseline() {
     Serial.print("Baseline Alcohol Recorded at : "); Serial.println(bl_alcohol_val);
     /* END DEBUG */ 
     bMQ3Initialized = true;
+    digitalWrite(STATUS_LIGHT_YELLOW,LOW);
     return bl_alcohol_val;
   } 
   return 0.00;
@@ -172,24 +192,47 @@ float recordBaseline() {
     @return    return true if user is over limit
 */
 /**************************************************************************/
+
 boolean isOverLimit(float alcValue, float baseline_alcValue) {
+  boolean userIsOverLimit = false;
+  float delta = 0;
   /* BEGIN DEBUG */
-//  Serial.print("baseline "); Serial.println(baseline_alcValue);
-//  Serial.print("baseline*multiplier: "); Serial.println(baseline_alcValue*(PERCENTAGE_TOLERANCE/100));
+  Serial.print("isOverlimit: alcValue= ");
+  Serial.println(alcValue);
   /* END DEBUG */
-  
-  if (alcValue >= (baseline_alcValue*(PERCENTAGE_TOLERANCE/100)) + baseline_alcValue) {
-    digitalWrite(GATE_POWER_PIN,LOW);
-    digitalWrite(STATUS_LIGHT_YELLOW,HIGH);
-    return true;
+
+  //determine if user is over the limit
+  delta = getDeltaOfBlow();
+  //if the user is over the tolerance_delta value and the delta is in the positive direction fail the user.
+  if(delta > ALCOHOL_TOLERANCE_DELTA && delta > 0) {
+    userIsOverLimit = true;
   }
-  //TODO: Identify how to tell if the user even blew at all.
-  digitalWrite(GATE_POWER_PIN,HIGH);
-  digitalWrite(STATUS_LIGHT_YELLOW,LOW);
-  return false;
+  
+  if(userIsOverLimit) {
+    digitalWrite(GATE_POWER_PIN,LOW);
+    colorChange(50,0,0);
+    return true;
+  }else {
+    if(!bFingerprintFailed) {
+      digitalWrite(GATE_POWER_PIN,HIGH); 
+    }
+    colorChange(0,50,0); //green
+    return false;
+  }
 }
 
-
+float getDeltaOfBlow() {
+  float mq3FirstRead = 0;
+  float mq3SecondRead = 0;
+  float delta = 0;
+  
+  mq3FirstRead = readAlcoholLevel(100);
+  delay(500);
+  mq3SecondRead = readAlcoholLevel(100);
+ 
+  delta =  mq3SecondRead - mq3FirstRead;
+  return delta;
+}
 /**************************************************************************/
 /*!
     @brief     this is how we check if the user has blown into the device if not remain car locked
@@ -203,15 +246,19 @@ boolean isUserBlowing() {
   float mq3Value2 = 0;
   float actualDelta = 0;
   
-  mq3Value1 = mq3Value2 = readAlcoholLevel(100);
+  mq3Value1 = readAlcoholLevel(100);
   delay(500);
   mq3Value2 = readAlcoholLevel(100);
  
-  actualDelta =  abs(mq3Value2 - mq3Value1);
+  actualDelta =  abs(mq3Value2*100 - mq3Value1*100);
   //BEGIN DEBUG
-  Serial.println(actualDelta);
+  Serial.println("");
+  Serial.print("VALUE 1: "); Serial.println(mq3Value1*100);
+  Serial.print("VALUE 2: "); Serial.println(mq3Value2*100);
+  Serial.print("DELTA: ");   Serial.println(actualDelta);
+  Serial.println("");
   //END DEBUG
-  if (actualDelta > TOLERANCE_DELTA) {
+  if (actualDelta*100 > BREATH_DELTA*100) {
     return true;
   }
   return false;
@@ -223,7 +270,8 @@ boolean isUserBlowing() {
     @return    return true on success
 */
 /**************************************************************************/
-boolean colorChange(int red, int blue, int green) {
+boolean colorChange(int red, int blue, int green ) {
+  
   analogWrite(RED_RGB_PIN_STATUS,red);
   analogWrite(GREEN_RGB_PIN_STATUS,green);
   analogWrite(BLUE_RGB_PIN_STATUS,blue);
@@ -264,15 +312,30 @@ float readAlcoholLevel(int reads) {
 /**************************************************************************/
 int getFingerprintStatus() {
   uint8_t p = finger.getImage();
-  if (p != FINGERPRINT_OK)  return -1;
+  if (p != FINGERPRINT_OK)  {
+    return -1;
+  }
 
   p = finger.image2Tz();
-  if (p != FINGERPRINT_OK)  return -1;
+  if (p != FINGERPRINT_OK) {
+    return -1;
+  }
 
   p = finger.fingerFastSearch();
-  if (p != FINGERPRINT_OK)  return -1;
+  if (p != FINGERPRINT_OK)  {
+    Serial.println(failed_attempts);
+    if(failed_attempts >= (NUMBER_OF_FAILED_ATTEMPTS-1)) {
+      colorChange(80,25,0); // yellow on failed finger scan
+      finger.end();
+      bUserFailedToAuth = true;
+      
+    }
+    failed_attempts++;
+    return -1;
+  }
   
   // found a match!
+  colorChange(0, 0, 50); // green on pass
   Serial.print("Found ID #"); Serial.print(finger.fingerID); 
   //To identify confidence use finger.confidence;however, practically useless.
   return finger.fingerID; 
